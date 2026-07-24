@@ -15,15 +15,38 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * 订单服务
  */
 @Service
 public class OrderService extends ServiceImpl<OrderInfoMapper, OrderInfo> {
+
+    private static final AtomicInteger ORDER_SEQUENCE = new AtomicInteger(0);
+
+    private static final Map<Integer, String> STATUS_DESCRIPTIONS = new HashMap<>();
+    static {
+        STATUS_DESCRIPTIONS.put(0, "订单已创建");
+        STATUS_DESCRIPTIONS.put(1, "订单已支付，等待取件");
+        STATUS_DESCRIPTIONS.put(2, "已取件，正在洗涤中");
+        STATUS_DESCRIPTIONS.put(3, "洗涤完成，已送达");
+        STATUS_DESCRIPTIONS.put(4, "订单已取消");
+    }
+
+    private static final Map<Integer, List<Integer>> VALID_STATUS_TRANSITIONS = new HashMap<>();
+    static {
+        VALID_STATUS_TRANSITIONS.put(0, Arrays.asList(1, 4));
+        VALID_STATUS_TRANSITIONS.put(1, Arrays.asList(2, 4));
+        VALID_STATUS_TRANSITIONS.put(2, Arrays.asList(3));
+        VALID_STATUS_TRANSITIONS.put(3, Collections.emptyList());
+        VALID_STATUS_TRANSITIONS.put(4, Collections.emptyList());
+    }
     
     @Autowired
     private UserMapper userMapper;
@@ -95,9 +118,7 @@ public class OrderService extends ServiceImpl<OrderInfoMapper, OrderInfo> {
         order.setShopId(laundryInfo.getShopId());
         order.setLaundryInfoId(dto.getLaundryInfoId());
         order.setQuantity(dto.getQuantity());
-        order.setTotalPrice(laundryInfo.getOriginalPrice() != null 
-                ? laundryInfo.getOriginalPrice().multiply(new BigDecimal(dto.getQuantity()))
-                : laundryInfo.getPrice().multiply(new BigDecimal(dto.getQuantity())));
+        order.setTotalPrice(laundryInfo.getPrice().multiply(new BigDecimal(dto.getQuantity())));
         order.setStatus(0);
         order.setRemark(dto.getRemark());
         order.setPickupAddress(dto.getPickupAddress());
@@ -140,14 +161,24 @@ public class OrderService extends ServiceImpl<OrderInfoMapper, OrderInfo> {
         if (order == null) {
             throw new BusinessException("订单不存在");
         }
-        
+
+        Integer currentStatus = order.getStatus();
+        List<Integer> allowedNext = VALID_STATUS_TRANSITIONS.getOrDefault(currentStatus, Collections.emptyList());
+        if (!allowedNext.contains(status)) {
+            throw new BusinessException("订单状态不允许从 " + currentStatus + " 跳转到 " + status);
+        }
+
         order.setStatus(status);
         if (status == 3) {
             order.setCompleteTime(LocalDateTime.now());
         }
         this.updateById(order);
-        
-        addProgress(id, status, description != null ? description : "状态更新", operatorId);
+
+        String finalDescription = description;
+        if (finalDescription == null || finalDescription.isEmpty()) {
+            finalDescription = STATUS_DESCRIPTIONS.getOrDefault(status, "状态更新");
+        }
+        addProgress(id, status, finalDescription, operatorId);
     }
     
     /**
@@ -159,14 +190,17 @@ public class OrderService extends ServiceImpl<OrderInfoMapper, OrderInfo> {
         if (order == null) {
             throw new BusinessException("订单不存在");
         }
-        if (order.getStatus() >= 1) {
+        if (order.getStatus() >= 2) {
             throw new BusinessException("订单已在处理中，无法取消");
         }
-        
+        if (order.getStatus() == 4) {
+            throw new BusinessException("订单已取消");
+        }
+
         order.setStatus(4);
         this.updateById(order);
-        
-        addProgress(id, 4, "订单已取消", operatorId);
+
+        addProgress(id, 4, STATUS_DESCRIPTIONS.get(4), operatorId);
     }
     
     /**
@@ -214,9 +248,12 @@ public class OrderService extends ServiceImpl<OrderInfoMapper, OrderInfo> {
     }
     
     private String generateOrderNo() {
-        String dateStr = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"));
-        int count = (int) (System.currentTimeMillis() % 10000);
-        return "ORD" + dateStr + String.format("%04d", count);
+        String dateStr = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
+        int seq = ORDER_SEQUENCE.incrementAndGet() % 10000;
+        if (seq < 0) {
+            seq = -seq;
+        }
+        return "ORD" + dateStr + String.format("%04d", seq);
     }
     
     private void fillInfo(OrderInfo order) {
