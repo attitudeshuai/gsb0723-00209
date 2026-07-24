@@ -64,7 +64,26 @@ public class OrderProgressService extends ServiceImpl<OrderProgressMapper, Order
      * 添加订单进度
      */
     public void addProgress(OrderProgress progress) {
+        if (progress.getDescription() == null || progress.getDescription().isEmpty()) {
+            progress.setDescription(getProgressDescription(progress.getStatus()));
+        }
         this.save(progress);
+    }
+
+    private String getProgressDescription(Integer status) {
+        if (status == null) {
+            return "进度更新";
+        }
+        switch (status) {
+            case 0: return "已下单";
+            case 1: return "已取件";
+            case 2: return "洗涤中";
+            case 3: return "已烘干";
+            case 4: return "已整理";
+            case 5: return "配送中";
+            case 6: return "已送达";
+            default: return "进度更新";
+        }
     }
     
     private void fillInfo(OrderProgress progress) {
