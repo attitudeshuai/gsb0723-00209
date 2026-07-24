@@ -100,6 +100,8 @@ public class ShopService extends ServiceImpl<ShopMapper, Shop> {
         }
         
         shop.setId(id);
+        shop.setOwnerId(existing.getOwnerId());
+        shop.setStatus(existing.getStatus());
         this.updateById(shop);
     }
     

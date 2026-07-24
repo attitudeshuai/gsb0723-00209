@@ -9,6 +9,7 @@ import com.laundry.entity.*;
 import com.laundry.exception.BusinessException;
 import com.laundry.mapper.*;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -18,6 +19,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ThreadLocalRandom;
 
 /**
  * 订单服务
@@ -90,23 +92,31 @@ public class OrderService extends ServiceImpl<OrderInfoMapper, OrderInfo> {
         }
         
         OrderInfo order = new OrderInfo();
-        order.setOrderNo(generateOrderNo());
         order.setCustomerId(customerId);
         order.setShopId(laundryInfo.getShopId());
         order.setLaundryInfoId(dto.getLaundryInfoId());
         order.setQuantity(dto.getQuantity());
-        order.setTotalPrice(laundryInfo.getOriginalPrice() != null 
-                ? laundryInfo.getOriginalPrice().multiply(new BigDecimal(dto.getQuantity()))
-                : laundryInfo.getPrice().multiply(new BigDecimal(dto.getQuantity())));
+        order.setTotalPrice(laundryInfo.getPrice().multiply(new BigDecimal(dto.getQuantity())));
         order.setStatus(0);
         order.setRemark(dto.getRemark());
         order.setPickupAddress(dto.getPickupAddress());
         order.setDeliveryAddress(dto.getDeliveryAddress());
-        
-        this.save(order);
+
+        int maxRetry = 3;
+        for (int attempt = 0; attempt < maxRetry; attempt++) {
+            order.setOrderNo(generateOrderNo());
+            try {
+                this.save(order);
+                break;
+            } catch (DuplicateKeyException e) {
+                if (attempt == maxRetry - 1) {
+                    throw new BusinessException("订单号生成失败，请稍后重试");
+                }
+            }
+        }
         
         // 添加订单进度
-        addProgress(order.getId(), 0, "订单已创建", customerId);
+        addProgress(order.getId(), 0, getStatusDescription(0), customerId);
         
         return order;
     }
@@ -128,7 +138,7 @@ public class OrderService extends ServiceImpl<OrderInfoMapper, OrderInfo> {
         order.setPaymentTime(LocalDateTime.now());
         this.updateById(order);
         
-        addProgress(id, 1, "订单已支付，等待取件", operatorId);
+        addProgress(id, 1, getStatusDescription(1), operatorId);
     }
     
     /**
@@ -141,13 +151,19 @@ public class OrderService extends ServiceImpl<OrderInfoMapper, OrderInfo> {
             throw new BusinessException("订单不存在");
         }
         
+        if (!isValidTransition(order.getStatus(), status)) {
+            throw new BusinessException("订单状态不允许从「" + getStatusDescription(order.getStatus())
+                    + "」变更为「" + getStatusDescription(status) + "」");
+        }
+        
         order.setStatus(status);
         if (status == 3) {
             order.setCompleteTime(LocalDateTime.now());
         }
         this.updateById(order);
         
-        addProgress(id, status, description != null ? description : "状态更新", operatorId);
+        String desc = (description != null && !description.isEmpty()) ? description : getStatusDescription(status);
+        addProgress(id, status, desc, operatorId);
     }
     
     /**
@@ -159,14 +175,14 @@ public class OrderService extends ServiceImpl<OrderInfoMapper, OrderInfo> {
         if (order == null) {
             throw new BusinessException("订单不存在");
         }
-        if (order.getStatus() >= 1) {
-            throw new BusinessException("订单已在处理中，无法取消");
+        if (order.getStatus() != 0 && order.getStatus() != 1) {
+            throw new BusinessException("当前订单状态无法取消");
         }
         
         order.setStatus(4);
         this.updateById(order);
         
-        addProgress(id, 4, "订单已取消", operatorId);
+        addProgress(id, 4, getStatusDescription(4), operatorId);
     }
     
     /**
@@ -214,9 +230,39 @@ public class OrderService extends ServiceImpl<OrderInfoMapper, OrderInfo> {
     }
     
     private String generateOrderNo() {
-        String dateStr = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"));
-        int count = (int) (System.currentTimeMillis() % 10000);
-        return "ORD" + dateStr + String.format("%04d", count);
+        String dateStr = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
+        int random = ThreadLocalRandom.current().nextInt(100000, 1000000);
+        return "ORD" + dateStr + String.format("%06d", random);
+    }
+
+    private boolean isValidTransition(Integer currentStatus, Integer targetStatus) {
+        if (currentStatus == null || targetStatus == null) {
+            return false;
+        }
+        switch (currentStatus) {
+            case 0:
+                return targetStatus == 1 || targetStatus == 4;
+            case 1:
+                return targetStatus == 2 || targetStatus == 4;
+            case 2:
+                return targetStatus == 3;
+            default:
+                return false;
+        }
+    }
+
+    private String getStatusDescription(Integer status) {
+        if (status == null) {
+            return "未知状态";
+        }
+        switch (status) {
+            case 0: return "订单已创建";
+            case 1: return "订单已支付，等待取件";
+            case 2: return "订单洗涤中";
+            case 3: return "订单已完成";
+            case 4: return "订单已取消";
+            default: return "状态更新";
+        }
     }
     
     private void fillInfo(OrderInfo order) {
