@@ -99,8 +99,25 @@ public class ShopService extends ServiceImpl<ShopMapper, Shop> {
             throw new BusinessException("店铺不存在");
         }
         
-        shop.setId(id);
-        this.updateById(shop);
+        if (shop.getName() != null) {
+            existing.setName(shop.getName());
+        }
+        if (shop.getLogo() != null) {
+            existing.setLogo(shop.getLogo());
+        }
+        if (shop.getDescription() != null) {
+            existing.setDescription(shop.getDescription());
+        }
+        if (shop.getAddress() != null) {
+            existing.setAddress(shop.getAddress());
+        }
+        if (shop.getPhone() != null) {
+            existing.setPhone(shop.getPhone());
+        }
+        if (shop.getBusinessHours() != null) {
+            existing.setBusinessHours(shop.getBusinessHours());
+        }
+        this.updateById(existing);
     }
     
     /**
