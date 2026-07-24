@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Build outputs
+dist/
+build/
+target/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Git
+.git/
+.gitignore
+
+# Docs
+*.md
+README*
+
+# Logs
+*.log
+logs/
+
+# Temp
+*.tmp
+.cache/
