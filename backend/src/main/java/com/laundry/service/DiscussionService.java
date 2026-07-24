@@ -149,6 +149,7 @@ public class DiscussionService extends ServiceImpl<DiscussionMapper, Discussion>
     /**
      * 添加评论
      */
+    @Transactional
     public void addComment(Comment comment) {
         Discussion discussion = this.getById(comment.getDiscussionId());
         if (discussion == null) {
@@ -158,6 +159,11 @@ public class DiscussionService extends ServiceImpl<DiscussionMapper, Discussion>
         comment.setLikeCount(0);
         comment.setStatus(1);
         commentMapper.insert(comment);
+        
+        // 回写帖子评论数，保持计数与评论记录一致
+        Integer commentCount = discussion.getCommentCount();
+        discussion.setCommentCount((commentCount == null ? 0 : commentCount) + 1);
+        this.updateById(discussion);
     }
     
     private void fillUserInfo(Discussion discussion) {

@@ -100,6 +100,8 @@ public class ShopService extends ServiceImpl<ShopMapper, Shop> {
         }
         
         shop.setId(id);
+        // 店铺归属不可通过编辑接口修改，强制沿用原 ownerId，防止归属被篡改
+        shop.setOwnerId(existing.getOwnerId());
         this.updateById(shop);
     }
     
